@@ -1,4 +1,4 @@
-# The Embedding Alphabet (TEA)
+# The Embedded Alphabet (TEA)
 
 ![Model Architecture](Model_Architecture.png)
 
