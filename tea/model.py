@@ -8,10 +8,10 @@ from torch.nn import functional as F
 
 class Tea(nn.Module, PyTorchModelHubMixin, repo_url="tea", license="mit"):
     """
-    The Embedding Alphabet (tea) model for converting input pLMs embeddings into tea sequences.
+    The Embedded Alphabet (tea) model for converting input pLMs embeddings into tea sequences.
 
     This model consists of two linear layers, normalization, and dropout,
-    followed by a codebook-based decoder. It provides methods to compute Shannon
+    followed by a decoder. It provides methods to compute Shannon
     entropy over the output distribution and to convert model outputs into character
     sequences.
 
@@ -41,7 +41,7 @@ class Tea(nn.Module, PyTorchModelHubMixin, repo_url="tea", license="mit"):
         self.layer_norm = nn.LayerNorm(hidden_size)
         self.decoder = nn.Linear(hidden_size, codebook_size)
         self.dropout = nn.Dropout(p=dropout_prob)
-        self.eps = 1e-8  # Add epsilon for numerical stability
+        self.eps = 1e-8
 
         characters = list("ACDEFGHIKLMNPQRSTVWYacdefghiklmnpqrstvwy")
         self.characters = characters[: self.codebook_size]
@@ -74,13 +74,9 @@ class Tea(nn.Module, PyTorchModelHubMixin, repo_url="tea", license="mit"):
     ):
         if logits is None:
             logits = self(embeddings)
-
-        # Build a mask to ignore specified token ids
         ignore_mask = torch.ones_like(input_ids, dtype=torch.bool)
         for token_id in self.ignore_token_ids:
             ignore_mask &= input_ids != token_id
-
-        # Get token predictions
         predicted_indices = torch.argmax(logits, dim=-1)
 
         sequences = []
@@ -88,7 +84,6 @@ class Tea(nn.Module, PyTorchModelHubMixin, repo_url="tea", license="mit"):
         residue_entropy_list = []
         avg_entropy_list = []
 
-        # Iterate over all sequences in the batch
         for seq_idx, seq_logits, mask in zip(predicted_indices, logits, ignore_mask):
             filtered_indices = seq_idx[mask]
             filtered_logits = seq_logits[mask]
@@ -99,7 +94,6 @@ class Tea(nn.Module, PyTorchModelHubMixin, repo_url="tea", license="mit"):
             residue_entropy_list.append(entropies)
             avg_entropy_list.append(entropies.mean().item())
 
-        # Decide on return type
         if not (return_avg_entropy or return_logits or return_residue_entropy):
             return sequences
 
