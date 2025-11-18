@@ -10,10 +10,9 @@ class Tea(nn.Module, PyTorchModelHubMixin, repo_url="tea", license="mit"):
     """
     The Embedding Alphabet (tea) model for converting input pLMs embeddings into tea sequences.
 
-    This model consists of two linear layers, normalization, and dropout,
-    followed by a codebook-based decoder. It provides methods to compute Shannon
-    entropy over the output distribution and to convert model outputs into character
-    sequences.
+    This model consists of two linear layers with dropout and normalization. It provides methods 
+    to compute Shannon entropy over the output distribution and to convert model outputs into 
+    character sequences.
 
     Args:
         representation_size (int): Dimensionality of input representations.
