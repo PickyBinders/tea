@@ -15,7 +15,7 @@ pip install git+https://github.com/sliM-Lp/tea.git
 The `tea_convert` command takes protein sequences from a FASTA file and generates new tea-FASTA. It supports confidence-based sequence output where low-confidence positions are displayed in lowercase, and has options for saving logits and entropy. If `--save_avg_entropy` is set, the FASTA identifiers will contain the average entropy of the sequence in the format `<key>|H=<avg_entropy>`.
 
 ```bash
-usage: tea_convert [-h] -f FASTA_FILE -o OUTPUT_FILE [-s] [-e] [-r] [-l] [-t ENTROPY_THRESHOLD]
+usage: tea_convert [-h] -f FASTA_FILE -o OUTPUT_FILE [-l] [-H] [-r] [-c] [-t ENTROPY_THRESHOLD]
 
 options:
   -h, --help            show this help message and exit
