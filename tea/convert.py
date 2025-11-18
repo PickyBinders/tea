@@ -226,7 +226,7 @@ def convert_sequences(
                             )
                         if save_avg_entropy:
                             f.write(
-                                f">{header}|avg_entropy={result['avg_entropy']:.3f}\n{result['sequence']}\n"
+                                f">{header}|H={result['avg_entropy']:.3f}\n{result['sequence']}\n"
                             )
                         else:
                             f.write(f">{header}\n{result['sequence']}\n")
@@ -262,13 +262,13 @@ def main():
         help="Output FASTA file for generated tea sequences",
     )
     parser.add_argument(
-        "-s",
+        "-l",
         "--save_logits",
         action="store_true",
         help="Save per-residue logits to .pt file",
     )
     parser.add_argument(
-        "-e",
+        "-H",
         "--save_avg_entropy",
         action="store_true",
         help="Save average entropy values in FASTA identifiers",
@@ -280,7 +280,7 @@ def main():
         help="Save per-residue entropy values to .pt file",
     )
     parser.add_argument(
-        "-l",
+        "-c",
         "--lowercase_entropy",
         action="store_true",
         help="Save residues with entropy > threshold in lowercase",
@@ -289,7 +289,7 @@ def main():
         "-t",
         "--entropy_threshold",
         type=float,
-        default=0.3,
+        default=0.25,
         help="Entropy threshold for lowercase conversion",
     )
 

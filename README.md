@@ -12,7 +12,7 @@ pip install git+https://github.com/sliM-Lp/tea.git
 
 ## Sequence Conversion with TEA
 
-The `tea_convert` command takes protein sequences from a FASTA file and generates new tea-FASTA. It supports confidence-based sequence output where low-confidence positions are displayed in lowercase, and has options for saving logits and entropy. If `--save_avg_entropy` is set, the FASTA identifiers will contain the average entropy of the sequence in the format `<key>|avg_entropy=<avg_entropy>`.
+The `tea_convert` command takes protein sequences from a FASTA file and generates new tea-FASTA. It supports confidence-based sequence output where low-confidence positions are displayed in lowercase, and has options for saving logits and entropy. If `--save_avg_entropy` is set, the FASTA identifiers will contain the average entropy of the sequence in the format `<key>|H=<avg_entropy>`.
 
 ```bash
 usage: tea_convert [-h] -f FASTA_FILE -o OUTPUT_FILE [-s] [-e] [-r] [-l] [-t ENTROPY_THRESHOLD]
@@ -23,12 +23,12 @@ options:
                         Input FASTA file containing protein amino acid sequences
   -o OUTPUT_FILE, --output_file OUTPUT_FILE
                         Output FASTA file for generated tea sequences
-  -s, --save_logits     Save per-residue logits to .pt file
-  -e, --save_avg_entropy
+  -l, --save_logits     Save per-residue logits to .pt file
+  -H, --save_avg_entropy
                         Save average entropy values in FASTA identifiers
   -r, --save_residue_entropy
                         Save per-residue entropy values to .pt file
-  -l, --lowercase_entropy
+  -c, --lowercase_entropy
                         Save residues with entropy > threshold in lowercase
   -t ENTROPY_THRESHOLD, --entropy_threshold ENTROPY_THRESHOLD
                         Entropy threshold for lowercase conversion
