@@ -35,9 +35,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["tea*"]
-namespaces = false
+include = ["tea"]
 
 [tool.setuptools.package-data]
 tea = ["matcha.out"]
