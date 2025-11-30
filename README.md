@@ -2,7 +2,7 @@
 
 ![Model Architecture](Model_Architecture.png)
 
-This repository contains the code accompanying our pre-print (link coming soon).
+This repository contains the code accompanying our pre-print: [Rewriting protein alphabets with language models](https://www.biorxiv.org/content/10.1101/2025.11.27.690975v1). A web server with TEA converted datasets is available [here](https://alphabet.scicore.unibas.ch).
 
 ## Installation
 
