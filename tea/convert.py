@@ -2,7 +2,7 @@ from pathlib import Path
 from biotite.sequence.io import fasta
 import re
 import torch
-from transformers import AutoTokenizer, AutoModel
+from transformers import AutoTokenizer, AutoModel, BitsAndBytesConfig
 from collections import defaultdict
 from .model import Tea
 import logging
@@ -303,14 +303,7 @@ def main():
     tea.eval()
     logger.info("Loading model from facebook/esm2_t33_650M_UR50D")
     tokenizer = AutoTokenizer.from_pretrained("facebook/esm2_t33_650M_UR50D")
-    if "cuda" in device.type:
-        logger.info("Using CUDA")
-        from transformers import BitsAndBytesConfig
-
-        bnb_config = BitsAndBytesConfig(load_in_4bit=True)
-    else:
-        logger.info("Using CPU")
-        bnb_config = None
+    bnb_config = BitsAndBytesConfig(load_in_4bit=True)
     esm2 = AutoModel.from_pretrained(
         "facebook/esm2_t33_650M_UR50D",
         dtype="auto",
