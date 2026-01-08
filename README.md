@@ -47,7 +47,7 @@ tea = Tea.from_pretrained("PickyBinders/tea")
 tea.eval()
 device = next(tea.parameters()).device
 tokenizer = AutoTokenizer.from_pretrained("facebook/esm2_t33_650M_UR50D")
-bnb_config = BitsAndBytesConfig(load_in_4bit=True) if torch.cuda.is_available() else None
+bnb_config = BitsAndBytesConfig(load_in_4bit=True)
 esm2 = AutoModel.from_pretrained(
         "facebook/esm2_t33_650M_UR50D",
         torch_dtype="auto",
