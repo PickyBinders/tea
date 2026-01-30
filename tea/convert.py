@@ -77,7 +77,7 @@ def run_batch(
     device = next(tea.parameters()).device
     try:
         spaced_seqs = [" ".join(list(re.sub(r"[UZOBJ]", "X", seq.replace("-", "")))) for _, seq in sequences]
-        batch = tokenizer.batch_encode_plus(
+        batch = tokenizer.__call__(
             spaced_seqs, add_special_tokens=True, padding="longest"
         )
         if len(batch) == 0:
