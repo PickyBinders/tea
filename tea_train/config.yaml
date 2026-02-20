@@ -1,0 +1,80 @@
+data:
+  class_path: tea_train.dataloader.ProteinPairDataModule
+  init_args:
+    batch_size: 16
+    data_folder: data/
+    embeddings_prefix: data/embeddings/esm2_4bit
+    max_residue_triplets: 2000000
+    max_seq_length: 1024
+    num_workers: 0
+lr_scheduler:
+  class_path: torch.optim.lr_scheduler.CosineAnnealingLR
+  init_args:
+    T_max: 10
+    eta_min: 0.0001
+    last_epoch: -1
+model:
+  class_path: tea_train.train_tea.TeaModule
+  init_args:
+    model:
+      class_path: tea.model.Tea
+      init_args:
+        representation_size: 1280
+        hidden_size: 1280
+        codebook_size: 20
+        dropout_prob: 0.1
+        ignore_token_ids: [0, 1, 2]
+    loss_weights:
+      mean_entropy: 0.1
+      neg_weight: 1
+      pos_weight: 1
+      si_loss: 1.0
+      uniform_kl_loss: 0.5
+optimizer:
+  class_path: deepspeed.ops.adam.FusedAdam
+  init_args:
+    betas:
+    - 0.9
+    - 0.999
+    eps: 1.0e-08
+    lr: 0.005
+    weight_decay: 0.3
+seed_everything: 42
+trainer:
+  accelerator: auto
+  accumulate_grad_batches: 1
+  benchmark: true
+  callbacks:
+  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+    init_args:
+      dirpath: checkpoints
+      filename: tea-{epoch}
+      mode: min
+      monitor: val/loss
+      save_last: false
+      save_top_k: 10
+  - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+    init_args:
+      log_momentum: false
+      log_weight_decay: false
+      logging_interval: step
+  detect_anomaly: false
+  deterministic: false
+  enable_checkpointing: true
+  enable_progress_bar: true
+  gradient_clip_algorithm: norm
+  gradient_clip_val: 1
+  log_every_n_steps: 1
+  logger:
+    class_path: lightning.pytorch.loggers.WandbLogger
+    init_args:
+      log_model: false
+      offline: true
+      prefix: ''
+      project: Tea
+      save_dir: logs
+  max_epochs: 10
+  num_nodes: 1
+  num_sanity_val_steps: 0
+  precision: 32
+  strategy: auto

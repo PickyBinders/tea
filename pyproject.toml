@@ -12,6 +12,15 @@ dependencies = [
     "accelerate>=1.7.0",
 ]
 description = "The Embedded Alphabet"
+
+[project.optional-dependencies]
+training = [
+    "lightning",
+    "deepspeed",
+    "wandb",
+    "pandas",
+    "pyarrow",
+]
 readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [
@@ -35,7 +44,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["tea"]
+include = ["tea","tea_train"]
 
 [tool.setuptools.package-data]
 tea = ["matcha.out"]
