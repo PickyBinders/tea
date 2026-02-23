@@ -12,6 +12,13 @@ dependencies = [
     "accelerate>=1.7.0",
 ]
 description = "The Embedded Alphabet"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
 
 [project.optional-dependencies]
 training = [
@@ -20,13 +27,6 @@ training = [
     "wandb",
     "pandas",
     "pyarrow",
-]
-readme = "README.md"
-requires-python = ">=3.10"
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
 ]
 
 [project.urls]
