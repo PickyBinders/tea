@@ -156,8 +156,10 @@ def convert_sequences(
     entropy_lowercase_threshold=0.3,
 ):
     length_groups = defaultdict(list)
+    input_order = []
     num_sequences = 0
     for header, seq in fasta.FastaFile.read(fasta_file).items():
+        input_order.append(header)
         found = False
         seq_len = len(seq)
         for bin_len in LENGTH_BINS:
@@ -190,7 +192,10 @@ def convert_sequences(
     )
     disable_tqdm = logger.getEffectiveLevel() > logging.INFO
 
-    with open(output_file, "w") as f:
+    # Write results in batched order to a temp file, then reorder
+    import tempfile, os
+    tmp_file = str(output_file) + ".tmp"
+    with open(tmp_file, "w") as f:
         for s, (seq_len, group) in enumerate(length_groups.items()):
             batch_size = BATCH_SIZES.get(seq_len, 1)
             total_batches = (len(group) + batch_size - 1) // batch_size
@@ -232,6 +237,30 @@ def convert_sequences(
                             logits_dict[header] = result["logits"]
                         if save_residue_entropy:
                             residue_entropy_dict[header] = result["residue_entropy"]
+
+    # Reorder to match original input order (only headers + byte offsets in memory)
+    logger.info("Reordering output to match input FASTA order...")
+    header_to_offset = {}
+    with open(tmp_file) as f:
+        while True:
+            offset = f.tell()
+            line = f.readline()
+            if not line:
+                break
+            if line.startswith(">"):
+                hdr = line[1:].split("|")[0].split()[0].strip()
+                header_to_offset[hdr] = offset
+
+    with open(tmp_file) as fin, open(output_file, "w") as fout:
+        for header in input_order:
+            hdr_key = header.split("|")[0].split()[0].strip()
+            if hdr_key not in header_to_offset:
+                continue
+            fin.seek(header_to_offset[hdr_key])
+            fout.write(fin.readline())  # header line
+            fout.write(fin.readline())  # sequence line
+
+    os.remove(tmp_file)
     if save_logits:
         torch.save(logits_dict, output_file.parent / f"{output_file.stem}_logits.pt")
     if save_residue_entropy:
