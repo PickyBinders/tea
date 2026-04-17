@@ -57,7 +57,7 @@ esm2 = AutoModel.from_pretrained(
 esm2.eval()
 sequence_examples = ["PRTEINO", "SEQWENCE"]
 sequence_examples = [" ".join(list(re.sub(r"[UZOBJ]", "X", sequence))) for sequence in sequence_examples]
-ids = tokenizer.__call__(sequence_examples, add_special_tokens=True, padding="longest")
+ids = tokenizer(sequence_examples, add_special_tokens=True, padding="longest")
 input_ids = torch.tensor(ids['input_ids']).to(device)
 attention_mask = torch.tensor(ids['attention_mask']).to(device)
 with torch.no_grad():

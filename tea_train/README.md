@@ -1,6 +1,6 @@
 # How to train your TEA
 
-Framework for training TEA from sequences and structures using the SCOPe40 dataset.
+Framework for training TEA using SCOPe40.
 
 ## Installation
 
