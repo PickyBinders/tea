@@ -71,4 +71,4 @@ results
 ```
 ## Search with TEA against Many
 
-In order to perform fast sequence searches and generate alignments, we recommend checking out sTEAm. This tool is designed to leverage both TEA representations and standard amino acid information, allowing you to execute comprehensive dual-character sequence screening against large datasets. You can find the repository and usage instructions at [github.com/PickyBinders/steam](github.com/PickyBinders/steam).
+In order to perform fast sequence searches and generate alignments, we recommend checking out STEAM. This tool is designed to leverage both TEA representations and standard amino acid information, allowing you to execute comprehensive dual-character sequence screening against large datasets. You can find the repository and usage instructions at [github.com/PickyBinders/steam](https://github.com/PickyBinders/steam).
