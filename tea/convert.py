@@ -248,12 +248,12 @@ def convert_sequences(
             if not line:
                 break
             if line.startswith(">"):
-                hdr = line[1:].split("|")[0].split()[0].strip()
+                hdr = line[1:].split("|H=")[0].strip()
                 header_to_offset[hdr] = offset
 
     with open(tmp_file) as fin, open(output_file, "w") as fout:
         for header in input_order:
-            hdr_key = header.split("|")[0].split()[0].strip()
+            hdr_key = header.split("|H=")[0].strip()
             if hdr_key not in header_to_offset:
                 continue
             fin.seek(header_to_offset[hdr_key])
