@@ -9,6 +9,8 @@ This repository contains the code accompanying our pre-print: [Rewriting protein
 ```bash
 python -m pip install git+https://github.com/PickyBinders/tea.git
 ```
+* Tested on Python 3.11, 3.12 and 3.13
+* Typical installation time: 2min
 
 ## Sequence Conversion with TEA
 
@@ -67,26 +69,6 @@ with torch.no_grad():
     results = tea.to_sequences(embeddings=x, input_ids=input_ids, return_avg_entropy=True, return_logits=False, return_residue_entropy=False)
 results
 ```
+## Search with TEA against Many
 
-## Using tea sequences with MMseqs2
-
-The `matcha.out` substitution matrix is included with the tea package. You can get its path programmatically:
-
-```python
-from tea import get_matrix_path
-matcha_path = get_matrix_path()
-print(f"Matrix path: {matcha_path}")
-```
-
-Then use it with MMseqs2:
-
-```bash
-mmseqs easy-search tea_query.fasta tea_target.fasta results.m8 tmp/ \
-    --comp-bias-corr 0 \
-    --mask 0 \
-    --gap-open 18 \
-    --gap-extend 3 \
-    --sub-mat /path/to/matcha.out \
-    --seed-sub-mat /path/to/matcha.out \
-    --exact-kmer-matching 1
-```
+In order to perform fast sequence searches and generate alignments, we recommend checking out sTEAm. This tool is designed to leverage both TEA representations and standard amino acid information, allowing you to execute comprehensive dual-character sequence screening against large datasets. You can find the repository and usage instructions at [github.com/PickyBinders/steam](github.com/PickyBinders/steam).
