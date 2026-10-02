@@ -7,7 +7,7 @@ This repository contains the code accompanying our pre-print: [Rewriting protein
 ## Installation
 
 ```bash
-python -m pip install git+https://github.com/PickyBinders/tea.git
+python -m pip install 'git+https://github.com/PickyBinders/tea.git@dev'
 ```
 * Tested on Python 3.11, 3.12 and 3.13
 * Typical installation time: 2min
