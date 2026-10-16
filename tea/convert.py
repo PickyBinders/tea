@@ -23,21 +23,22 @@ UNKNOWN_RESIDUES = str.maketrans({letter: "X" for letter in "UZOBJ"})
 
 
 def _enable_fp32_rotary(model):
-    """Keep ESM2 rotary positions in FP32 without changing FP16 activations."""
-    from transformers.models.esm.modeling_esm import RotaryEmbedding
+    """Keep ESM2 rotary positions in FP32 without changing FP16 activations.
 
-    rotary = [module for module in model.modules() if isinstance(module, RotaryEmbedding)]
-    if len(rotary) != model.config.num_hidden_layers:
-        raise ValueError("Expected one ESM rotary module per encoder layer")
+    The shared rotary module returns cos/sin in the activation dtype, while
+    apply_rotary_pos_emb already rotates q/k in FP32 before casting back.
+    """
+    from transformers.models.esm.modeling_esm import EsmRotaryEmbedding
+
+    rotary = [module for module in model.modules() if isinstance(module, EsmRotaryEmbedding)]
+    if len(rotary) != 1:
+        raise ValueError("Expected one shared ESM rotary module")
     for module in rotary:
-        module.inv_freq = RotaryEmbedding(module.inv_freq.numel() * 2).inv_freq.to(
+        module.inv_freq = module.compute_default_rope_parameters(module.config)[0].to(
             device=module.inv_freq.device, dtype=torch.float32,
         )
-        module._seq_len_cached = module._cos_cached = module._sin_cached = None
-        module.register_forward_hook(
-            lambda _module, inputs, outputs: tuple(
-                value.to(original.dtype) for value, original in zip(outputs, inputs)
-            )
+        module.register_forward_pre_hook(
+            lambda _module, inputs: (inputs[0].float(), *inputs[1:])
         )
 
 
@@ -63,7 +64,7 @@ def _load_models(device):
     )
     encoder = AutoModel.from_pretrained(
         ESM2_MODEL, revision=ESM2_REVISION, local_files_only=False,
-        torch_dtype=torch.float16, cache_dir=cache_dir,
+        dtype=torch.float16, cache_dir=cache_dir,
         quantization_config=BitsAndBytesConfig(
             load_in_4bit=True, bnb_4bit_quant_type="fp4",
             bnb_4bit_use_double_quant=False,

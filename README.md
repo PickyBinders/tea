@@ -57,7 +57,7 @@ bnb_config = BitsAndBytesConfig(
 esm2 = AutoModel.from_pretrained(
         "facebook/esm2_t33_650M_UR50D",
         revision="08e4846e537177426273712802403f7ba8261b6c",
-        torch_dtype=torch.float16,
+        dtype=torch.float16,
         quantization_config=bnb_config,
         device_map={"": str(device)},
         add_pooling_layer=False,
