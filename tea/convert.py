@@ -1,6 +1,10 @@
 """Convert FASTA sequences with the current ESM2-650M TEA model."""
 
 import argparse
+from functools import lru_cache
+from importlib.resources import files
+import json
+import math
 import os
 from pathlib import Path
 import tempfile
@@ -20,6 +24,19 @@ TEA_MODEL = "PickyBinders/tea"
 TEA_REVISION = "dev"
 BATCH_RESIDUES = 8192
 UNKNOWN_RESIDUES = str.maketrans({letter: "X" for letter in "UZOBJ"})
+
+
+@lru_cache(maxsize=1)
+def _tea_likelihood_weights():
+    """Frozen matrix–Markov log odds, bundled independently of STEAM."""
+    table = json.loads(files("tea").joinpath("data/tea_likelihood.json").read_text())
+    return table["alphabet"], table["scores"]
+
+
+def _residue_entropy(logits):
+    """Native T=1 Shannon entropy, normalized to the 20-letter range [0, 1]."""
+    probabilities = logits.float().softmax(-1)
+    return (torch.special.entr(probabilities).sum(-1) / math.log(20)).clamp_(0, 1)
 
 
 def _enable_fp32_rotary(model):
@@ -109,7 +126,7 @@ def _batches(sequences, budget=BATCH_RESIDUES):
 
 
 @torch.inference_mode()
-def _convert_batch(sequences, tokenizer, encoder, head, device, cutoff, headers):
+def _convert_batch(sequences, tokenizer, encoder, head, device, headers):
     tokens = tokenizer(
         [" ".join(sequence) for sequence in sequences],
         return_tensors="pt", padding=True, add_special_tokens=True,
@@ -128,43 +145,28 @@ def _convert_batch(sequences, tokenizer, encoder, head, device, cutoff, headers)
         raise ValueError("TEA head returned an unexpected number of residue logits")
     lengths = list(map(len, sequences))
     states = logits.argmax(-1).cpu().split(lengths)
-    need_spread = cutoff is not None or headers
-    spread = logits.float().std(dim=-1, correction=0) if need_spread else None
-    masked = spread.cpu().split(lengths) if cutoff is not None else None
+    entropy = _residue_entropy(logits).cpu().split(lengths) if headers else None
     if headers:
-        raw = logits.float()
-        normalized = (
-            (raw - raw.mean(dim=-1, keepdim=True))
-            / spread.clamp_min(torch.finfo(torch.float32).tiny)[:, None]
-        )
-        probabilities = normalized.softmax(dim=-1).max(dim=-1).values
-        spread_means = torch.stack([part.mean() for part in spread.split(lengths)]).cpu().tolist()
-        probability_means = torch.stack([
-            part.mean() for part in probabilities.split(lengths)
-        ]).cpu().tolist()
-    else:
-        spread_means = probability_means = [None] * len(sequences)
+        alphabet, weights = _tea_likelihood_weights()
+        if "".join(head.characters) != alphabet:
+            raise ValueError("tea_likelihood requires the current public TEA letter order")
     converted = []
     for index, state in enumerate(states):
-        letters = [head.characters[token] for token in state.tolist()]
-        if cutoff is not None:
-            letters = [
-                letter.lower() if value < cutoff else letter
-                for letter, value in zip(letters, masked[index].tolist())
-            ]
-        converted.append(("".join(letters), spread_means[index], probability_means[index]))
+        choices = state.tolist()
+        letters = [head.characters[token] for token in choices]
+        mean_entropy = float(entropy[index].mean()) if headers else None
+        # A single residue has no adjacent pair; use the neutral score zero.
+        tea_likelihood = (sum(weights[a][b] for a, b in zip(choices, choices[1:]))
+                            / (len(choices)-1)) if headers and len(choices) > 1 else 0.0
+        converted.append(("".join(letters).upper(), mean_entropy, tea_likelihood))
     return converted
 
 
-def convert(fasta, output, *, lowercase_logit_spread_below=None,
-            confidence_headers=False, _models=None):
+def convert(fasta, output, *, confidence_headers=True, _models=None):
     """Write TEA FASTA in source order and return conversion timing."""
     fasta, output = Path(fasta), Path(output)
     if output.exists() or output.is_symlink():
         raise FileExistsError(output)
-    if (lowercase_logit_spread_below is not None
-            and (not 0 <= lowercase_logit_spread_below < float("inf"))):
-        raise ValueError("Logit-spread cutoff must be finite and nonnegative")
     identifiers, sequences = _read_fasta(fasta)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tokenizer, encoder, head = _models or _load_models(device)
@@ -177,12 +179,12 @@ def convert(fasta, output, *, lowercase_logit_spread_below=None,
         for indices in _batches(sequences):
             batch = _convert_batch(
                 [sequences[index] for index in indices], tokenizer, encoder, head,
-                device, lowercase_logit_spread_below, confidence_headers,
+                device, confidence_headers,
             )
-            for index, (sequence, spread, probability) in zip(indices, batch):
+            for index, (sequence, entropy, tea_likelihood) in zip(indices, batch):
                 header = identifiers[index]
                 if confidence_headers:
-                    header += f"|TLS={spread:.2f}|TCP={probability:.3f}"
+                    header += f"|TH={entropy:.3f}|TL={tea_likelihood:.3f}"
                 offsets[index] = spool.tell()
                 spool.write(f">{header}\n{sequence}\n")
         descriptor, name = tempfile.mkstemp(
@@ -210,14 +212,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fasta", "-f", type=Path, required=True)
     parser.add_argument("--output", "-o", type=Path, required=True)
-    parser.add_argument("--lowercase-logit-spread-below", type=float,
-                        help="Lowercase residues with raw-logit spread below this value")
-    parser.add_argument("--confidence-headers", action="store_true",
-                        help="Append mean logit spread (TLS) and scale-free certainty (TCP)")
+    parser.add_argument("--confidence-headers", action=argparse.BooleanOptionalAction, default=True,
+                        help="Append mean entropy (TH) and tea_likelihood (TL); enabled by default")
     args = parser.parse_args()
     result = convert(
         args.fasta, args.output,
-        lowercase_logit_spread_below=args.lowercase_logit_spread_below,
         confidence_headers=args.confidence_headers,
     )
     print(

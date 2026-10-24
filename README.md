@@ -14,25 +14,23 @@ python -m pip install 'git+https://github.com/PickyBinders/tea.git@dev'
 
 ## Sequence Conversion with TEA
 
-The `tea_convert` command takes protein sequences from a FASTA file and generates a TEA FASTA. It uses the ESM2-650M model and the TEA checkpoint from the Hugging Face `dev` revision. Length-based batching is automatic, and conversion time is reported after completion. Optionally, residues with low raw-logit spread can be written in lowercase, and mean logit spread (`TLS`) and scale-free certainty (`TCP`) can be added to FASTA headers.
+The `tea_convert` command takes protein sequences from a FASTA file and generates an uppercase TEA FASTA. It uses the ESM2-650M model and the TEA checkpoint from the Hugging Face `dev` revision. Length-based batching is automatic, and conversion time is reported after completion. FASTA headers include mean residue entropy (`TH`, 0–1) and `tea_likelihood` (`TL`, matrix–Markov mean adjacent-transition log odds in bits; zero for single-residue sequences). Header values are rounded to three decimals.
 
 ```bash
-tea_convert --fasta proteins.fasta --output proteins.tea.fasta \
-  --lowercase-logit-spread-below 3.5 --confidence-headers
+tea_convert --fasta proteins.fasta --output proteins.tea.fasta
 ```
 
 ```text
 usage: tea_convert [-h] --fasta FASTA --output OUTPUT
-                   [--lowercase-logit-spread-below LOWERCASE_LOGIT_SPREAD_BELOW]
-                   [--confidence-headers]
+                   [--confidence-headers | --no-confidence-headers]
 
 options:
   -h, --help            show this help message and exit
   --fasta FASTA, -f FASTA
   --output OUTPUT, -o OUTPUT
-  --lowercase-logit-spread-below LOWERCASE_LOGIT_SPREAD_BELOW
-                        Lowercase residues with raw-logit spread below this value
-  --confidence-headers  Append mean logit spread (TLS) and scale-free certainty (TCP)
+  --confidence-headers, --no-confidence-headers
+                        Append mean entropy (TH) and tea_likelihood (TL);
+                        enabled by default
 ```
 
 ### Using the huggingface model

@@ -47,4 +47,4 @@ build-backend = "setuptools.build_meta"
 include = ["tea","tea_train"]
 
 [tool.setuptools.package-data]
-tea = ["matcha.out"]
+tea = ["data/*.json"]
