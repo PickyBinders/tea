@@ -1,24 +1,30 @@
 """Small, model-free checks for the public converter."""
 
-import importlib
 import csv
+import importlib
 import json
 import math
 import os
-from pathlib import Path
 import sys
+import unittest
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-import unittest
 from unittest.mock import patch
 
-import torch
-
 import tea.convert as public_convert
+import torch
 from tea.convert import _batches, _convert_batch, _residue_entropy, _tea_likelihood_weights, convert
 
 
 class FakeTokenizer:
+    padding_side = "right"
+    cls_token_id = eos_token_id = pad_token_id = 0
+    unk_token_id = 2
+
+    def get_vocab(self):
+        return {"<cls>": 0, "<unk>": 2, "A": 1, "C": 2}
+
     def __call__(self, sequences, **_):
         lengths = [len(sequence.split()) for sequence in sequences]
         width = max(lengths) + 2
@@ -36,6 +42,9 @@ class FakeTokenizer:
 
 
 class FakeEncoder:
+    def dequantize(self, **_):
+        return self
+
     def eval(self):
         return self
 
@@ -88,7 +97,8 @@ class PublicConvertTests(unittest.TestCase):
     def test_shared_rotary_preserves_fp32_positions_and_fp16_attention(self):
         from transformers import EsmConfig
         from transformers.models.esm.modeling_esm import (
-            EsmRotaryEmbedding, apply_rotary_pos_emb,
+            EsmRotaryEmbedding,
+            apply_rotary_pos_emb,
         )
 
         config = EsmConfig(hidden_size=320, num_attention_heads=5,
@@ -173,6 +183,24 @@ class PublicConvertTests(unittest.TestCase):
             convert(source, output, confidence_headers=False,
                     _models=(FakeTokenizer(), FakeEncoder(), FakeHead()))
             self.assertEqual(output.read_text(), ">sp|P12345|NAME\nAC\n")
+
+    def test_converter_reuses_models_across_files(self):
+        encoder = FakeEncoder()
+        with TemporaryDirectory() as folder, \
+             patch.object(public_convert, "_load_models", return_value=(
+                 FakeTokenizer(), encoder, FakeHead(),
+             )) as load, \
+             patch.object(encoder, "dequantize", return_value=encoder) as unpack:
+            source = Path(folder) / "aa.fa"
+            source.write_text(">short\nA\n>long\nCCC\n")
+            converter = public_convert.Converter(compile=False)
+            outputs = [Path(folder) / f"{index}.fa" for index in range(2)]
+            for output in outputs:
+                converter.convert(source, output)
+            self.assertEqual(outputs[0].read_bytes(), outputs[1].read_bytes())
+            self.assertIn(b"|TH=", outputs[0].read_bytes())
+            load.assert_called_once()
+            unpack.assert_called_once_with(dtype=torch.float16)
 
     def test_removed_lowercase_option_is_rejected(self):
         with self.assertRaisesRegex(TypeError, 'lowercase_entropy_above'):

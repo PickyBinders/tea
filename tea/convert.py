@@ -1,22 +1,22 @@
 """Convert FASTA sequences with the current ESM2-650M TEA model."""
 
 import argparse
-from functools import lru_cache
-from importlib.resources import files
 import json
 import math
 import os
-from pathlib import Path
 import tempfile
 import time
+from functools import lru_cache
+from importlib.resources import files
+from pathlib import Path
 
-from biotite.sequence.io.fasta import FastaFile
 import torch
+from biotite.sequence.io.fasta import FastaFile
 from huggingface_hub import try_to_load_from_cache
 from transformers import AutoModel, AutoTokenizer, BitsAndBytesConfig
 
+from tea._inference import CompilerCache, ResidueTokenizer, compile_encoder
 from tea.model import Tea
-
 
 ESM2_MODEL = "facebook/esm2_t33_650M_UR50D"
 ESM2_REVISION = "08e4846e537177426273712802403f7ba8261b6c"
@@ -162,50 +162,77 @@ def _convert_batch(sequences, tokenizer, encoder, head, device, headers):
     return converted
 
 
-def convert(fasta, output, *, confidence_headers=True, _models=None):
-    """Write TEA FASTA in source order and return conversion timing."""
-    fasta, output = Path(fasta), Path(output)
-    if output.exists() or output.is_symlink():
-        raise FileExistsError(output)
-    identifiers, sequences = _read_fasta(fasta)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tokenizer, encoder, head = _models or _load_models(device)
-    if device.type == "cuda":
-        torch.cuda.synchronize()
-    started = time.perf_counter()
-    output.parent.mkdir(parents=True, exist_ok=True)
-    offsets = [None] * len(identifiers)
-    with tempfile.TemporaryFile(mode="w+t", dir=output.parent) as spool:
-        for indices in _batches(sequences):
-            batch = _convert_batch(
-                [sequences[index] for index in indices], tokenizer, encoder, head,
-                device, confidence_headers,
+class Converter:
+    """Reuse loaded FP16 models and compiled blocks across FASTA files."""
+
+    def __init__(self, *, compile=True, compiler_cache=None, _models=None):
+        self._models = _models
+        self._compile = compile
+        self._cache_dir = compiler_cache
+        self._cache = None
+
+    def convert(self, fasta, output, *, confidence_headers=True):
+        """Write TEA FASTA in source order and return conversion timing."""
+        fasta, output = Path(fasta), Path(output)
+        if output.exists() or output.is_symlink():
+            raise FileExistsError(output)
+        identifiers, sequences = _read_fasta(fasta)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if self._models is None:
+            tokenizer, encoder, head = _load_models(device)
+            encoder = encoder.dequantize(dtype=torch.float16).eval().requires_grad_(False)
+            if self._compile:
+                self._cache = CompilerCache(self._cache_dir)
+                self._cache.load()
+                encoder = compile_encoder(encoder)
+            self._models = ResidueTokenizer(tokenizer), encoder, head
+        tokenizer, encoder, head = self._models
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        started = time.perf_counter()
+        output.parent.mkdir(parents=True, exist_ok=True)
+        offsets = [None] * len(identifiers)
+        with tempfile.TemporaryFile(mode="w+t", dir=output.parent) as spool:
+            for indices in _batches(sequences):
+                batch = _convert_batch(
+                    [sequences[index] for index in indices], tokenizer, encoder, head,
+                    device, confidence_headers,
+                )
+                for index, (sequence, entropy, tea_likelihood) in zip(indices, batch):
+                    header = identifiers[index]
+                    if confidence_headers:
+                        header += f"|TH={entropy:.3f}|TL={tea_likelihood:.3f}"
+                    offsets[index] = spool.tell()
+                    spool.write(f">{header}\n{sequence}\n")
+            descriptor, name = tempfile.mkstemp(
+                prefix=output.name + ".", suffix=".partial", dir=output.parent,
             )
-            for index, (sequence, entropy, tea_likelihood) in zip(indices, batch):
-                header = identifiers[index]
-                if confidence_headers:
-                    header += f"|TH={entropy:.3f}|TL={tea_likelihood:.3f}"
-                offsets[index] = spool.tell()
-                spool.write(f">{header}\n{sequence}\n")
-        descriptor, name = tempfile.mkstemp(
-            prefix=output.name + ".", suffix=".partial", dir=output.parent,
-        )
-        temporary = Path(name)
-        try:
-            with os.fdopen(descriptor, "w") as handle:
-                for offset in offsets:
-                    if offset is None:
-                        raise ValueError("Conversion did not cover every input sequence")
-                    spool.seek(offset)
-                    handle.write(spool.readline())
-                    handle.write(spool.readline())
-            os.replace(temporary, output)
-        finally:
-            temporary.unlink(missing_ok=True)
-    if device.type == "cuda":
-        torch.cuda.synchronize()
-    return {"chains": len(identifiers), "residues": sum(map(len, sequences)),
-            "seconds_excluding_model_load": time.perf_counter() - started}
+            temporary = Path(name)
+            try:
+                with os.fdopen(descriptor, "w") as handle:
+                    for offset in offsets:
+                        if offset is None:
+                            raise ValueError("Conversion did not cover every input sequence")
+                        spool.seek(offset)
+                        handle.write(spool.readline())
+                        handle.write(spool.readline())
+                os.replace(temporary, output)
+            finally:
+                temporary.unlink(missing_ok=True)
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        elapsed = time.perf_counter() - started
+        if self._cache is not None:
+            self._cache.save()
+        return {"chains": len(identifiers), "residues": sum(map(len, sequences)),
+                "seconds_excluding_model_load": elapsed}
+
+
+def convert(fasta, output, *, confidence_headers=True, compile=True, compiler_cache=None, _models=None):
+    """Convert one FASTA; use Converter to keep models loaded across files."""
+    return Converter(compile=compile, compiler_cache=compiler_cache, _models=_models).convert(
+        fasta, output, confidence_headers=confidence_headers,
+    )
 
 
 def main():
@@ -214,10 +241,15 @@ def main():
     parser.add_argument("--output", "-o", type=Path, required=True)
     parser.add_argument("--confidence-headers", action=argparse.BooleanOptionalAction, default=True,
                         help="Append mean entropy (TH) and tea_likelihood (TL); enabled by default")
+    parser.add_argument("--compile", action=argparse.BooleanOptionalAction, default=True,
+                        help="Compile FP16 encoder blocks; enabled by default")
+    parser.add_argument("--compiler-cache", type=Path,
+                        help="Shared compiler cache directory (default: ~/.cache/tea/compiler)")
     args = parser.parse_args()
     result = convert(
         args.fasta, args.output,
         confidence_headers=args.confidence_headers,
+        compile=args.compile, compiler_cache=args.compiler_cache,
     )
     print(
         f"Converted {result['chains']} sequences ({result['residues']} residues) "
