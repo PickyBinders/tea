@@ -14,7 +14,7 @@ python -m pip install 'git+https://github.com/PickyBinders/tea.git@dev'
 
 ## Sequence Conversion with TEA
 
-The `tea_convert` command takes protein sequences from a FASTA file and generates an uppercase TEA FASTA. It uses the ESM2-650M model and the TEA checkpoint from the Hugging Face `dev` revision. Length-based batching is automatic, and conversion time is reported after completion. FASTA headers include mean residue entropy (`TH`, 0–1) and `tea_likelihood` (`TL`, matrix–Markov mean adjacent-transition log odds in bits; zero for single-residue sequences). Header values are rounded to three decimals. Conversion uses direct residue token lookup and FP16 weights dequantized once from the FP4 checkpoint. Encoder blocks are compiled with CUDA graph replay; attention masks and rotary calculations retain their native behavior.
+The `tea_convert` command takes protein sequences from a FASTA file and generates an uppercase TEA FASTA. It uses the ESM2-650M model and the TEA checkpoint from the Hugging Face `dev` revision. Length-based batching is automatic, and conversion time is reported after completion. FASTA headers include mean residue entropy (`TH`, 0–1) and `tea_likelihood` (`TL`, matrix–Markov mean adjacent-transition log odds in bits; zero for single-residue sequences). Header values are rounded to three decimals.
 
 ```bash
 tea_convert --fasta proteins.fasta --output proteins.tea.fasta
@@ -38,7 +38,7 @@ options:
                         Shared compiler cache directory
 ```
 
-Compilation requires PyTorch 2.8 or newer and a working C++/CUDA toolchain. The first conversion includes compilation; later processes reuse matching GPU/software compiler artifacts from `$XDG_CACHE_HOME/tea/compiler` (usually `~/.cache/tea/compiler`). Use `--compiler-cache PATH` to share this cache or `--no-compile` for eager FP16 inference. Loading and compilation are excluded from warm benchmark timings; the CLI timer includes any compilation triggered during conversion.
+Compilation requires PyTorch 2.8 or newer and a working C++/CUDA toolchain. The first conversion includes compilation; later processes reuse matching GPU/software compiler artifacts from `$XDG_CACHE_HOME/tea/compiler` (usually `~/.cache/tea/compiler`). Use `--compiler-cache PATH` to share this cache or `--no-compile` for eager FP16 inference.
 
 Keep models loaded when converting several files:
 
