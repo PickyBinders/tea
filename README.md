@@ -1,6 +1,6 @@
 # The Embedded Alphabet (TEA)
 
-![Model Architecture](<img width="2987" height="1158" alt="image" src="https://github.com/user-attachments/assets/09f17534-a9ee-40fb-84ee-eec4f0eb47ae" />)
+![Model Architecture](Model_Architecture.png)
 
 This repository contains the code accompanying our pre-print: [Rewriting protein alphabets with language models](https://doi.org/10.1101/2025.11.27.690975). A web server with TEA converted datasets and search capabilities is available [here](https://pickybinders.org/tea).
 
