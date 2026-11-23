@@ -1,9 +1,10 @@
 import torch
 import torch.nn as nn
 from huggingface_hub import PyTorchModelHubMixin
-from transformers import AutoTokenizer, AutoModel
-from transformers import BitsAndBytesConfig
 from torch.nn import functional as F
+
+
+DEFAULT_CHARACTERS = "ACDEFGHIKLMNPQRSTVWYacdefghiklmnpqrstvwy"
 
 
 class Tea(nn.Module, PyTorchModelHubMixin, repo_url="tea", license="mit"):
@@ -42,8 +43,7 @@ class Tea(nn.Module, PyTorchModelHubMixin, repo_url="tea", license="mit"):
         self.dropout = nn.Dropout(p=dropout_prob)
         self.eps = 1e-8
 
-        characters = list("ACDEFGHIKLMNPQRSTVWYacdefghiklmnpqrstvwy")
-        self.characters = characters[: self.codebook_size]
+        self.characters = list(DEFAULT_CHARACTERS[:codebook_size])
 
     def forward(self, x):
         x = self.dense(x)
@@ -67,9 +67,7 @@ class Tea(nn.Module, PyTorchModelHubMixin, repo_url="tea", license="mit"):
         embeddings,
         attention_mask=None,
         logits=None,
-        return_avg_entropy=False,
         return_logits=False,
-        return_residue_entropy=False,
     ):
         if logits is None:
             logits = self(embeddings)
@@ -80,27 +78,15 @@ class Tea(nn.Module, PyTorchModelHubMixin, repo_url="tea", license="mit"):
 
         sequences = []
         logits_list = []
-        residue_entropy_list = []
-        avg_entropy_list = []
 
         for seq_idx, seq_logits, mask in zip(predicted_indices, logits, ignore_mask):
             filtered_indices = seq_idx[mask]
-            filtered_logits = seq_logits[mask]
             sequence = "".join(self.characters[idx.item()] for idx in filtered_indices)
             sequences.append(sequence)
-            logits_list.append(filtered_logits)
-            entropies = self.compute_shannon_entropy(filtered_logits)
-            residue_entropy_list.append(entropies)
-            avg_entropy_list.append(entropies.mean().item())
+            if return_logits:
+                logits_list.append(seq_logits[mask])
 
-        if not (return_avg_entropy or return_logits or return_residue_entropy):
+        if not return_logits:
             return sequences
 
-        result = {"sequences": sequences}
-        if return_avg_entropy:
-            result["avg_entropy"] = avg_entropy_list
-        if return_residue_entropy:
-            result["residue_entropy"] = residue_entropy_list
-        if return_logits:
-            result["logits"] = logits_list
-        return result
+        return {"sequences": sequences, "logits": logits_list}
