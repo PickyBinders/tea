@@ -1,0 +1,58 @@
+seed_everything: 42
+model:
+  epochs: 4
+  recipe:
+    float32_matmul_precision: highest
+    fused_adamw: false
+    training_diagnostics: false
+    hidden_size: 1280
+    codebook_size: 20
+    dropout: 0.1
+    learning_rate: 0.005
+    weight_decay: 0.3
+    minimum_learning_rate: 0.0001
+    loss_weights:
+      si_loss: 1.0
+      pos_weight: 1.0
+      neg_weight: 1.0
+      uniform_kl_loss: 0.5
+      mean_entropy: 0.0
+    uniform_kl_population: triplets
+data:
+  data_folder: work/fold0
+  embeddings: work/embeddings
+  embedding_device: cuda
+  splits: work/data/splits/scope40_2_08.json
+  outer_fold: 0
+  batch_size: 16
+  num_workers: 0
+  max_triplets: 2048
+  sampling: family-balanced
+  mapping: work/data/raw/scope40_2_08/mapping.json
+trainer:
+  accelerator: gpu
+  devices: 1
+  precision: 32-true
+  deterministic: true
+  gradient_clip_val: 1.0
+  default_root_dir: work/training
+  enable_checkpointing: false
+  num_sanity_val_steps: 0
+  log_every_n_steps: 100
+  logger:
+    - class_path: lightning.pytorch.loggers.CSVLogger
+      init_args:
+        save_dir: work/training
+        name: training
+    - class_path: lightning.pytorch.loggers.WandbLogger
+      init_args:
+        project: Tea
+        offline: true
+        log_model: false
+        save_dir: work/training
+        name: tea
+        group: training
+        save_code: false
+        settings:
+          disable_code: true
+          disable_git: true

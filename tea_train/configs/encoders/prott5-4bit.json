@@ -1,0 +1,10 @@
+{
+  "model_id": "Rostlab/prot_t5_xl_uniref50",
+  "revision": "973be27c52ee6474de9c945952a8008aeb2a1a73",
+  "backend": "t5",
+  "dimension": 1024,
+  "precision": "4bit",
+  "window": 1024,
+  "overlap": 128,
+  "structure_pretrained": false
+}

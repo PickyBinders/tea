@@ -1,13 +1,13 @@
-import numpy as np
-import numba as nb
-import pandas as pnd
-from pathlib import Path
-from tqdm import tqdm
-import multiprocessing
-from dataclasses import dataclass
-from tea.train.align_and_extract import alignment_to_numpy
+"""Create the structural triplets used by the original TEA training recipe."""
+
 import json
-import argparse
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+import pandas as pd
+from biotite.sequence.align import Alignment
+from lightning.pytorch.cli import LightningArgumentParser
+
 
 @dataclass
 class ResidueTriplet:
@@ -40,149 +40,117 @@ class ResidueTriplet:
             ]
         )
 
-def sample_from_protein_pair_scop(
-    data: dict,
-    negative_start=1,
-    negative_end=5,
-    tm_score_threshold=0.6,
-    rmsd_threshold=5,
-):
-    """
-    Creates ResidueTriplet objects from two aligned proteins
 
-    Parameters
-    ----------
-    data
-        dict with 'id_1', 'id_2', 'tm_score_min', 'aln', 'rmsds'
-    negative_start
-        start of negative pair
-    negative_end
-        end of negative pair
-    tm_score_threshold
-        TM-score threshold
-    rmsd_threshold
-        RMSD threshold
-    
-    Returns
-    -------
-    list of ResidueTriplet objects
-    """
-
-    
-    if data['tm_score_min'] < tm_score_threshold:
+def sample_pair(data, negative_start=1, negative_end=5,
+                tm_score_threshold=0.6, rmsd_threshold=5.0):
+    """Yield legacy multi-negative triplets from one US-align record."""
+    if data["tm_score_min"] < tm_score_threshold:
         return
-    # remove columns with gap in both sequences
-    aln_1 = data['aln'][data['id_1']]
-    aln_2 = data['aln'][data['id_2']]
-    keep_indices = [
-        i
-        for i in range(len(aln_1))
-        if aln_1[i] != "-" or aln_2[i] != "-"
-    ]
-    aln_pair = {
-        data['id_1']: "".join([aln_1[i] for i in keep_indices]),
-        data['id_2']: "".join([aln_2[i] for i in keep_indices]),
-    }
-    aln_np = alignment_to_numpy(aln_pair)
+    id_1, id_2 = data["id_1"], data["id_2"]
+    aligned = [data["aln"][id_1], data["aln"][id_2]]
+    trace = Alignment.trace_from_strings(aligned)
+    lengths = [len(sequence.replace("-", "")) for sequence in aligned]
 
-    for x in range(len(aln_np[data['id_1']])):
-        if data['rmsds'][x] is None or np.isnan(data['rmsds'][x]) or data['rmsds'][x] > rmsd_threshold:
+    for column, (index_1, positive) in enumerate(trace):
+        rmsd = data["rmsds"][column]
+        if index_1 == -1 or positive == -1 or rmsd is None or rmsd > rmsd_threshold:
             continue
-        a1, a2_positive = aln_np[data['id_1']][x], aln_np[data['id_2']][x]
-        if a1 == -1 or a2_positive == -1:
-            continue
-        negative_indices = []
-        # select [x-negative_end:x-negative_start] and [x+negative_start:x+negative_end] as negative pairs
-        for i in range(x - negative_end, x - negative_start + 1):
-            if i >= 0 and i < len(aln_np[data['id_2']]) and aln_np[data['id_2']][i] != -1:
-                negative_indices.append((i, aln_np[data['id_2']][i]))
-        for i in range(x + negative_start, x + negative_end + 1):
-            if i >= 0 and i < len(aln_np[data['id_2']]) and aln_np[data['id_2']][i] != -1:
-                negative_indices.append((i, aln_np[data['id_2']][i]))
-
-        for i, a2_negative in negative_indices:
+        for shift in range(-negative_end, negative_end + 1):
+            if abs(shift) < negative_start:
+                continue
+            other_column = column + shift
+            if not 0 <= other_column < len(trace):
+                continue
+            negative = trace[other_column, 1]
+            if negative == -1:
+                continue
             yield ResidueTriplet(
-                protein_1=f"{data['id_1']}/1-{len(aln_1.replace('-', ''))}",
-                protein_2=f"{data['id_2']}/1-{len(aln_2.replace('-', ''))}",
-                index_1=a1,
-                index_2_positive=a2_positive,
-                index_2_negative=a2_negative,
-                rmsd=data['rmsds'][x],
-                shift=i - x,
-                aa1=aln_pair[data['id_1']][x],
-                aa2_positive=aln_pair[data['id_2']][x],
-                aa2_negative=aln_pair[data['id_2']][i],
+                protein_1=f"{id_1}/1-{lengths[0]}",
+                protein_2=f"{id_2}/1-{lengths[1]}",
+                index_1=int(index_1),
+                index_2_positive=int(positive),
+                index_2_negative=int(negative),
+                shift=shift,
+                aa1=aligned[0][column],
+                aa2_positive=aligned[1][column],
+                aa2_negative=aligned[1][other_column],
+                rmsd=float(rmsd),
             )
 
 
-def make_training_data_triplet_scop(json_file,
-        output_file,
-        negative_start=1,
-        negative_end=10,
-        overwrite=False,
-        tm_score_threshold=0.6,
-        rmsd_threshold=5):
-    with open(json_file) as f:
-        data = json.load(f)
-    num = 0
-    if not output_file.exists() or overwrite:
-        with open(output_file, "w") as info_file:
-            header = [
-                "protein_1",
-                "protein_2",
-                "range_1",
-                "range_2",
-                "index_1",
-                "index_2_positive",
-                "index_2_negative",
-                "shift",
-                "aa1",
-                "aa2_positive",
-                "aa2_negative",
-                "rmsd",
-            ]
-            info_file.write("\t".join(header) + "\n")
+sample_from_protein_pair_scop = sample_pair
 
-            for residue_pair in sample_from_protein_pair_scop(
-                data,
-                negative_start=negative_start,
-                negative_end=negative_end,
-                tm_score_threshold=tm_score_threshold,
-                rmsd_threshold=rmsd_threshold,
-            ):
-                if residue_pair is None:
-                    continue
-                num += 1
-                info_file.write(
-                    f"{str(residue_pair)}\n"
-                )
-    return num
+
+def make_triplets(json_file, output_file, negative_start=1, negative_end=5,
+                  tm_score_threshold=0.6, rmsd_threshold=5.0):
+    with Path(json_file).open() as handle:
+        data = json.load(handle)
+    rows = []
+    for triplet in sample_pair(
+        data, negative_start, negative_end, tm_score_threshold, rmsd_threshold
+    ):
+        row = asdict(triplet)
+        row["protein_1"], row["range_1"] = row["protein_1"].split("/", 1)
+        row["protein_2"], row["range_2"] = row["protein_2"].split("/", 1)
+        rows.append(row)
+    columns = [
+        "protein_1", "protein_2", "range_1", "range_2", "index_1",
+        "index_2_positive", "index_2_negative", "shift", "aa1",
+        "aa2_positive", "aa2_negative", "rmsd",
+    ]
+    pd.DataFrame(rows, columns=columns).to_csv(output_file, sep="\t", index=False)
+    return len(rows)
+
+
+def make_training_data_triplet_scop(
+    json_file,
+    output_file,
+    negative_start=1,
+    negative_end=10,
+    overwrite=False,
+    tm_score_threshold=0.6,
+    rmsd_threshold=5.0,
+):
+    """Retain the original structural-triplet library entry point."""
+    output_file = Path(output_file)
+    if output_file.exists() and not overwrite:
+        return 0
+    return make_triplets(
+        json_file,
+        output_file,
+        negative_start,
+        negative_end,
+        tm_score_threshold,
+        rmsd_threshold,
+    )
+
 
 def main():
-    parser = argparse.ArgumentParser(description='Process SCOPe data and create training datasets')
-    parser.add_argument('json_file', type=Path, help='json file')
-    parser.add_argument('output_folder', type=Path, help='Output folder for processed data')
-    parser.add_argument('--overwrite', action='store_true', help='Overwrite existing files')
-    parser.add_argument('--tm_score_threshold', type=float, default=0.6, help='TM-score threshold')
-    parser.add_argument('--rmsd_threshold', type=float, default=5, help='RMSD threshold')
-    parser.add_argument('--negative_start', type=int, default=1, help='Negative start')
-    parser.add_argument('--negative_end', type=int, default=5, help='Negative end')
+    parser = LightningArgumentParser(description=__doc__)
+    parser.add_argument("json_file", type=Path)
+    parser.add_argument("output_folder", type=Path)
+    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--tm-score-threshold", type=float, default=0.6)
+    parser.add_argument("--rmsd-threshold", type=float, default=5.0)
+    parser.add_argument("--negative-start", type=int, default=1)
+    parser.add_argument("--negative-end", type=int, default=5)
     args = parser.parse_args()
 
-    args.output_folder.mkdir(exist_ok=True, parents=True)
-    output_file = args.output_folder / (args.json_file.stem + ".tsv")
-    if output_file.exists() and not args.overwrite:
-        print(f"Skipping {output_file.stem} because it already exists")
-    else:
-        make_training_data_triplet_scop(
-            json_file=args.json_file,
-            output_file=output_file,
-            negative_start=args.negative_start,
-            negative_end=args.negative_end,
-            overwrite=args.overwrite,
-            tm_score_threshold=args.tm_score_threshold,
-            rmsd_threshold=args.rmsd_threshold,
-        )
+    args.output_folder.mkdir(parents=True, exist_ok=True)
+    output = args.output_folder / f"{args.json_file.stem}.tsv"
+    if output.exists() and not args.overwrite:
+        print(f"Skipping existing {output}")
+        return
+    count = make_triplets(
+        args.json_file,
+        output,
+        args.negative_start,
+        args.negative_end,
+        args.tm_score_threshold,
+        args.rmsd_threshold,
+    )
+    print(f"Wrote {count} legacy structural triplets to {output}")
+
 
 if __name__ == "__main__":
     main()

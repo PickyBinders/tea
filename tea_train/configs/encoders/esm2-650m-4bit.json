@@ -1,0 +1,10 @@
+{
+  "model_id": "facebook/esm2_t33_650M_UR50D",
+  "revision": "08e4846e537177426273712802403f7ba8261b6c",
+  "backend": "esm2",
+  "dimension": 1280,
+  "precision": "4bit",
+  "window": 1024,
+  "overlap": 128,
+  "structure_pretrained": false
+}

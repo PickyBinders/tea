@@ -1,0 +1,49 @@
+seed_everything: 42
+model:
+  class_path: tea_train.train_tea.TeaModule
+  init_args:
+    model:
+      class_path: tea.model.Tea
+      init_args:
+        representation_size: 1280
+        hidden_size: 1280
+        codebook_size: 20
+        dropout_prob: 0.1
+        ignore_token_ids: [0, 1, 2]
+    loss_weights:
+      mean_entropy: 0.1
+      neg_weight: 1.0
+      pos_weight: 1.0
+      si_loss: 1.0
+      uniform_kl_loss: 0.5
+data:
+  class_path: tea_train.dataloader.ProteinPairDataModule
+  init_args:
+    data_folder: work/legacy_structural
+    embeddings_prefix: work/domain_embeddings
+    batch_size: 16
+    num_workers: 0
+    max_residue_triplets: 2000000
+    max_seq_length: 1024
+optimizer:
+  class_path: torch.optim.AdamW
+  init_args:
+    lr: 0.005
+    weight_decay: 0.3
+lr_scheduler:
+  class_path: torch.optim.lr_scheduler.CosineAnnealingLR
+  init_args:
+    T_max: 10
+    eta_min: 0.0001
+trainer:
+  accelerator: gpu
+  devices: 1
+  precision: 32-true
+  max_epochs: 10
+  gradient_clip_val: 1.0
+  default_root_dir: work/tea_v0
+  logger:
+    class_path: lightning.pytorch.loggers.CSVLogger
+    init_args:
+      save_dir: work/tea_v0
+      name: training

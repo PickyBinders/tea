@@ -7,6 +7,7 @@ from lightning.pytorch import LightningDataModule
 from torch.utils.data import DataLoader, Dataset
 import torch.nn.functional as F
 from tqdm import tqdm
+from tea_train.encoding import EmbeddingCache
 
 class ProteinPairDataset(Dataset):
     def __init__(
@@ -16,18 +17,28 @@ class ProteinPairDataset(Dataset):
         transform: Callable = None,
     ):
         self.data = pnd.read_parquet(data_file)
-        self._input_ids = torch.load(embeddings_prefix.parent / f"{embeddings_prefix.name}_tokens.pt")
-        self.embeddings_prefix = embeddings_prefix
-        self._embeddings = {}
         proteins = set(self.data["protein_1"]).union(self.data["protein_2"])
-        for embedding_file in embeddings_prefix.parent.glob(f"{embeddings_prefix.name}_embeddings_*.pt"):
-            e = torch.load(embedding_file)
-            self._embeddings.update({k: v for k, v in e.items() if k in proteins})
+        embeddings_prefix = Path(embeddings_prefix)
+        self.embeddings_prefix = embeddings_prefix
+        if (embeddings_prefix / "manifest.json").exists():
+            cache = EmbeddingCache(embeddings_prefix)
+            self._embeddings = {
+                key: cache[key] for key in proteins if key in cache.manifest["chains"]
+            }
+            self._input_ids = {
+                key: torch.zeros(len(value), dtype=torch.long)
+                for key, value in self._embeddings.items()
+            }
+        else:
+            self._input_ids = torch.load(embeddings_prefix.parent / f"{embeddings_prefix.name}_tokens.pt")
+            self._embeddings = {}
+            for embedding_file in embeddings_prefix.parent.glob(f"{embeddings_prefix.name}_embeddings_*.pt"):
+                e = torch.load(embedding_file)
+                self._embeddings.update({k: v for k, v in e.items() if k in proteins})
         self._input_ids = {k: v for k, v in self._input_ids.items() if len(v) > 1 and k in self._embeddings}
         self._embeddings = {k: v for k, v in self._embeddings.items() if len(v) > 1 and k in self._input_ids}
         assert all(self._embeddings[pid].shape[0] == self._input_ids[pid].shape[0] for pid in self._embeddings)
 
-        # Filter data to only include proteins we have tokenized sequences for
         self.data = self.data[
             self.data["protein_1"].isin(self._input_ids)
             & self.data["protein_2"].isin(self._input_ids)
@@ -93,7 +104,6 @@ def collate_protein_pairs(batch):
         indices_2_positive[i, :n] = idx2_positive
         indices_2_negative[i, :n] = idx2_negative
 
-        # Non-tensor data
         proteins_1.append(batch[i]["protein_1"])
         proteins_2.append(batch[i]["protein_2"])
         sequences_1.append(batch[i]["sequence_1"])
@@ -160,13 +170,11 @@ class RandomCropProteinPair:
             min_idx2, max_idx2, len(item["sequence_2"])
         )
         
-        # Crop sequences
         seq1_tokens = item["sequence_1"][start1:end1]
         seq2_tokens = item["sequence_2"][start2:end2]
         emb1 = item["embedding_1"][start1:end1]
         emb2 = item["embedding_2"][start2:end2]
 
-        # Filter residue pairs that fall within the crop
         valid_triplets = sorted(
             [
                 (idx1, idx2_positive, idx2_negative)
@@ -182,7 +190,6 @@ class RandomCropProteinPair:
             key=lambda x: (x[0], x[1]),
         )[: self.max_residue_triplets]
 
-        # Adjust indices to be relative to the crop
         indices_1 = [idx1 - start1 for idx1, _, _ in valid_triplets]
         indices_2_positive = [
             idx2_positive - start2 for _, idx2_positive, _ in valid_triplets

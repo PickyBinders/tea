@@ -1,171 +1,158 @@
-import numpy as np
-import numba as nb
+"""Create the structural alignments used by the original TEA training recipe."""
+
+import json
 import subprocess
 from pathlib import Path
-from biotite import structure as bio_struct
-from biotite.structure.io.pdb import PDBFile
+
+import numpy as np
+from biotite.sequence.align import Alignment
 from biotite.sequence.io.fasta import FastaFile
 from biotite.structure import AffineTransformation
+from biotite.structure.io.pdb import PDBFile
+from lightning.pytorch.cli import LightningArgumentParser
+
 
 def run_usalign(
-    pdb_file_1, pdb_file_2, matrices_folder, usalign_binary="USalign", overwrite=False
+    pdb_file_1,
+    pdb_file_2,
+    output_folder,
+    usalign_binary="USalign",
+    overwrite=False,
 ):
-    q1, q2 = pdb_file_1.stem, pdb_file_2.stem
-    fasta_file = matrices_folder / f"{q1}_{q2}.fasta"
-    if not fasta_file.exists() or overwrite:
-        with open(fasta_file, "w") as outfile:
-            subprocess.run(
-                [
-                    usalign_binary,
-                    str(pdb_file_1),
-                    str(pdb_file_2),
-                    "-mm",
-                    "1",
-                    "-ter",
-                    "1",
-                    "-m",
-                    matrices_folder / f"{q1}_{q2}",
-                    "-outfmt",
-                    "1",
-                ],
-                stdout=outfile,
-            )
+    """Run US-align and retain its alignment and transformation matrix."""
+    pair = f"{pdb_file_1.stem}_{pdb_file_2.stem}"
+    alignment_file = output_folder / f"{pair}.fasta"
+    matrix_file = output_folder / pair
+    if alignment_file.exists() and matrix_file.exists() and not overwrite:
+        return alignment_file, matrix_file
+    with alignment_file.open("w") as output:
+        subprocess.run(
+            [
+                str(usalign_binary),
+                str(pdb_file_1),
+                str(pdb_file_2),
+                "-mm",
+                "1",
+                "-ter",
+                "1",
+                "-m",
+                str(matrix_file),
+                "-outfmt",
+                "1",
+            ],
+            stdout=output,
+            check=True,
+        )
+    return alignment_file, matrix_file
+
+
+def read_usalign_alignment(path):
+    records = list(FastaFile.read(path).items())
+    ids = [header.split("\t")[0].split(":")[0].split("/")[-1].replace(".ent", "")
+           for header, _ in records]
+    sequences = [sequence for _, sequence in records]
+    tm_scores = [float(header.split("\t")[-1].split("=")[-1]) for header, _ in records]
+    length = min(map(len, sequences))
+    sequences = [sequence[:length] for sequence in sequences]
+    trace = Alignment.trace_from_strings(sequences)
+    return ids, sequences, trace, tm_scores
 
 
 def get_tm_score(filename):
-    """
-    gets TM score from a given fasta file returned by US-align
-
-    Parameters
-    ----------
-    filename
-        fasta file returned by US-align
-
-    Returns
-    -------
-    min_tm_score, max_tm_score
-    """
-    min_tmscore = 2
-    max_tmscore = 0
-    sequences = {k:v for k, v in FastaFile.read(filename).items()}
-    key = list(sequences.keys())[0]
-    for key, _ in FastaFile.read_iter(filename):
-        if key is None:
-            return []
-        tmscore = float(key.split("\t")[-1].split("=")[-1])
-        if tmscore < min_tmscore:
-            min_tmscore = tmscore
-        if tmscore > max_tmscore:
-            max_tmscore = tmscore
-    return min_tmscore, max_tmscore
+    """Return the minimum and maximum TM-scores from US-align output."""
+    *_, tm_scores = read_usalign_alignment(filename)
+    return min(tm_scores), max(tm_scores)
 
 
 def alignment_to_numpy(alignment):
-    aln_np = {}
-    for n in alignment:
-        aln_seq = []
-        index = 0
-        for a in alignment[n]:
-            if a == "-":
-                aln_seq.append(-1)
-            else:
-                aln_seq.append(index)
-                index += 1
-        aln_np[n] = np.array(aln_seq)
-    return aln_np
-
-def superpose_proteins(protein_1_file, protein_2_file, matrix_file):
-    """
-    Superposes two proteins using US-align-generated rotation, translation matrix
-
-    Parameters
-    ----------
-    protein_1_file
-        PDB file of protein_1
-    protein_2_file
-        PDB file of protein_2
-    matrix_file
-        US-align-generated rotation, translation matrix file
-    Returns
-    -------
-
-    """
-    matrix = np.zeros((3, 4))
-    with open(matrix_file) as f:
-        for i, line in enumerate(f):
-            if 1 < i < 5:
-                matrix[i - 2] = list(map(float, line.strip().split()[1:]))
-    pdb_1 = PDBFile.read(protein_1_file).get_structure()[0]
-    pdb_2 = PDBFile.read(protein_2_file).get_structure()[0]
-    transformation = AffineTransformation(np.zeros(3), matrix[:, 1:], matrix[:, 0])
-    pdb_1 = transformation.apply(pdb_1)
-    return pdb_1, pdb_2
+    """Return the historical per-column residue-index representation."""
+    trace = Alignment.trace_from_strings(list(alignment.values()))
+    return {
+        identifier: trace[:, index]
+        for index, identifier in enumerate(alignment)
+    }
 
 
-@nb.njit
-def get_rmsd(coords_1: np.ndarray, coords_2: np.ndarray) -> float:
-    """
-    RMSD of paired coordinates = normalized square-root of sum of squares of euclidean distances
-    """
-    return np.sqrt(np.sum((coords_1 - coords_2) ** 2) / coords_1.shape[0])
+def transform_structures(protein_1, protein_2, matrix_file):
+    matrix = np.loadtxt(matrix_file, skiprows=2, max_rows=3)[:, 1:]
+    structure_1 = PDBFile.read(protein_1).get_structure(model=1)
+    structure_2 = PDBFile.read(protein_2).get_structure(model=1)
+    transform = AffineTransformation(np.zeros(3), matrix[:, 1:], matrix[:, 0])
+    return transform.apply(structure_1), structure_2
 
 
-def get_info_json(id_1, id_2, pdb_folder, matrices_folder):
-    fasta_file = matrices_folder / f"{id_1}_{id_2}.fasta"
+superpose_proteins = transform_structures
+
+
+def extract_pair(id_1, id_2, pdb_folder, output_folder, usalign="USalign"):
+    """Return the original TEA structural-alignment JSON record."""
     pdb_file_1 = pdb_folder / id_1[2:4] / f"{id_1}.ent"
     pdb_file_2 = pdb_folder / id_2[2:4] / f"{id_2}.ent"
-    if not fasta_file.exists():
-        run_usalign(pdb_file_1, pdb_file_2, matrices_folder)
-    tm_score = get_tm_score(fasta_file)
-    if tm_score[0] < 0.6:
-        return None
-    pdb_1, pdb_2 = superpose_proteins(pdb_file_1, pdb_file_2, matrices_folder / f"{id_1}_{id_2}")
-    aln = {k: v for k, v in FastaFile.read(fasta_file).items()}
-    aln = {k.split("\t")[0].split(":")[0].split("/")[-1].replace(".ent", ""): aln[k] for k in aln}
-    max_length = min(len(aln[id_1]), len(aln[id_2]))
-    aln = {k: v[:max_length] for k, v in aln.items()}
-    coords_1 = pdb_1[pdb_1.atom_name == "CA"].coord
-    coords_2 = pdb_2[pdb_2.atom_name == "CA"].coord
-    aln_np = alignment_to_numpy(aln)
+    alignment_file, matrix_file = run_usalign(
+        pdb_file_1, pdb_file_2, output_folder, usalign
+    )
+    ids, sequences, trace, tm_scores = read_usalign_alignment(alignment_file)
+    if set(ids) != {id_1, id_2}:
+        raise ValueError(f"US-align returned unexpected identifiers: {ids}")
+
+    structure_1, structure_2 = transform_structures(
+        pdb_file_1, pdb_file_2, matrix_file
+    )
+    coordinates = {
+        id_1: structure_1[structure_1.atom_name == "CA"].coord,
+        id_2: structure_2[structure_2.atom_name == "CA"].coord,
+    }
+    order = {identifier: i for i, identifier in enumerate(ids)}
     rmsds = []
-    for x in range(len(aln_np[id_1])):
-        a1, a2 = aln_np[id_1][x], aln_np[id_2][x]
-        if a1 == -1 or a2 == -1:
-            rmsds.append(np.nan)
+    for column in trace:
+        index_1, index_2 = column[order[id_1]], column[order[id_2]]
+        if index_1 == -1 or index_2 == -1:
+            rmsds.append(None)
         else:
-            rmsd = get_rmsd(coords_1[a1], coords_2[a2])
-            rmsds.append(rmsd)
-    assert len(rmsds) == len(aln_np[id_1]), f"Length of rmsds and aln_np[id_1] do not match for {id_1} {id_2}"
-    assert len(rmsds) == len(aln_np[id_2]), f"Length of rmsds and aln_np[id_2] do not match for {id_1} {id_2}"
+            rmsds.append(float(np.linalg.norm(
+                coordinates[id_1][index_1] - coordinates[id_2][index_2]
+            )))
     return {
         "id_1": id_1,
         "id_2": id_2,
-        "tm_score_min": tm_score[0],
-        "tm_score_max": tm_score[1],
+        "tm_score_min": min(tm_scores),
+        "tm_score_max": max(tm_scores),
         "rmsds": rmsds,
-        "aln": aln,
+        "aln": {identifier: sequences[order[identifier]] for identifier in ids},
     }
 
+
+def get_info_json(id_1, id_2, pdb_folder, matrices_folder):
+    """Retain the original structural-preparation library entry point."""
+    record = extract_pair(id_1, id_2, pdb_folder, matrices_folder)
+    return record if record["tm_score_min"] >= 0.6 else None
+
+
 def main():
-    import json
-    from sys import argv
-    id_1, id_2, pdb_folder, matrices_folder = argv[1], argv[2], argv[3], argv[4]
-    pdb_folder = Path(pdb_folder)
-    matrices_folder = Path(matrices_folder)
-    json_file = matrices_folder / f"{id_1}_{id_2}.json"
-    if json_file.exists():
-        print(f"Skipping {id_1} {id_2} because it already exists")
+    parser = LightningArgumentParser(description=__doc__)
+    parser.add_argument("id_1")
+    parser.add_argument("id_2")
+    parser.add_argument("pdb_folder", type=Path)
+    parser.add_argument("output_folder", type=Path)
+    parser.add_argument("--usalign", type=Path, default=Path("USalign"))
+    parser.add_argument("--tm-score-threshold", type=float, default=0.6)
+    parser.add_argument("--overwrite", action="store_true")
+    args = parser.parse_args()
+
+    args.output_folder.mkdir(parents=True, exist_ok=True)
+    output = args.output_folder / f"{args.id_1}_{args.id_2}.json"
+    if output.exists() and not args.overwrite:
+        print(f"Skipping existing {output}")
         return
-    try:
-        info = get_info_json(id_1, id_2, pdb_folder, matrices_folder)
-        if info is None:
-            print(f"Skipping {id_1} {id_2} because it has a TM score less than 0.6")
-            return
-        with open(json_file, "w") as f:
-            json.dump(info, f)
-    except Exception as e:
-        print(f"Error {e} for {id_1} {id_2}")
+    record = extract_pair(
+        args.id_1, args.id_2, args.pdb_folder, args.output_folder, args.usalign
+    )
+    if record["tm_score_min"] < args.tm_score_threshold:
+        print(f"Skipping {args.id_1} {args.id_2}: TM-score below {args.tm_score_threshold}")
         return
+    with output.open("w") as handle:
+        json.dump(record, handle)
+
 
 if __name__ == "__main__":
     main()

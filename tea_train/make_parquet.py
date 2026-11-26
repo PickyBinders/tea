@@ -1,41 +1,81 @@
-from multiprocessing import Pool
-from tqdm import tqdm
+"""Combine original structural triplet tables into training parquet files."""
+
 import json
-import pandas as pd
 from pathlib import Path
 
-data = pd.concat([pd.read_csv(f, sep="\t") for f in tqdm(Path("data/scope40_2_08/triplets").glob("*.tsv"))])
-lookup_file = pd.read_csv("data/scope40_2_08/lookup_file.tsv", sep="\t", header=None, names=["id", "scop_id"])
-lookup_file["fold"] = lookup_file["scop_id"].map(lambda x: ".".join(x.split(".")[:2]))
-lookup_file["superfamily"] = lookup_file["scop_id"].map(lambda x: ".".join(x.split(".")[:3]))
-lookup_file["family"] = lookup_file["scop_id"].map(lambda x: ".".join(x.split(".")[:4]))
-lookup_file["architecture"] = lookup_file["scop_id"].map(lambda x: x.split(".")[0])
-id_to_scop = dict(zip(lookup_file["id"], lookup_file["scop_id"]))
-id_to_level = {}
-for level in ["fold", "superfamily", "family", "architecture"]:
-    id_to_level[level] = dict(zip(lookup_file["id"], lookup_file[level]))
-
-data["scop_id_1"] = data["protein_1"].map(lambda x: id_to_scop[x])
-data["scop_id_2"] = data["protein_2"].map(lambda x: id_to_scop[x])
-data["abs_shift"] = data["shift"].abs()
+from lightning.pytorch.cli import LightningArgumentParser
+import pandas as pd
 
 
-with open("data/scope40_2_08/fold_split.json", "r") as f:
-    fold_split = json.load(f)
+def make_parquet(
+    triplet_folder,
+    lookup_file,
+    fold_split,
+    output_folder,
+    validation_fold=0,
+    max_shift=5,
+):
+    tables = [
+        pd.read_csv(path, sep="\t")
+        for path in sorted(Path(triplet_folder).glob("*.tsv"))
+    ]
+    data = pd.concat(tables, ignore_index=True)
+    lookup = pd.read_csv(
+        lookup_file, sep="\t", header=None, names=["id", "scop_id"]
+    )
+    id_to_fold = dict(
+        zip(
+            lookup["id"],
+            lookup["scop_id"].map(
+                lambda value: ".".join(value.split(".")[:2])
+            ),
+        )
+    )
+    with Path(fold_split).open() as handle:
+        split = json.load(handle)
 
-data["fold_split"] = data["protein_1"].map(lambda x: fold_split[id_to_level["fold"][x]])
-data = data[data["abs_shift"] <= 5].sample(frac=1.0, random_state=42).groupby(["protein_1", "protein_2", "index_1", "index_2_positive"]).head(1).reset_index(drop=True)
-data = data[["protein_1", "protein_2", "index_1", "index_2_positive", "index_2_negative", "fold_split"]].reset_index(drop=True)
-data = data.groupby(['protein_1', 'protein_2', 'fold_split']).agg({
-    'index_1': list,
-    'index_2_positive': list, 
-    'index_2_negative': list
-}).apply(lambda x: {
-    'index_1': x['index_1'],
-    'index_2_positive': x['index_2_positive'],
-    'index_2_negative': x['index_2_negative']
-}, axis=1).rename('triplet_data').reset_index()
+    data["fold_split"] = data["protein_1"].map(
+        lambda key: split[id_to_fold[key]]
+    )
+    data = (
+        data[data["shift"].abs() <= max_shift]
+        .sample(frac=1.0, random_state=42)
+        .groupby(["protein_1", "protein_2", "index_1", "index_2_positive"])
+        .head(1)
+    )
+    columns = ["index_1", "index_2_positive", "index_2_negative"]
+    data = (
+        data.groupby(["protein_1", "protein_2", "fold_split"])[columns]
+        .agg(list)
+        .reset_index()
+    )
+    data["triplet_data"] = data[columns].apply(dict, axis=1)
+    data = data[["protein_1", "protein_2", "fold_split", "triplet_data"]]
 
-folder = Path("data")
-data.to_parquet(folder / "train.parquet", index=False)
-data[(data["fold_split"] == 0)].to_parquet(folder / "val.parquet", index=False)
+    output_folder = Path(output_folder)
+    output_folder.mkdir(parents=True, exist_ok=True)
+    data.to_parquet(output_folder / "train.parquet", index=False)
+    data[data["fold_split"] == validation_fold].to_parquet(
+        output_folder / "val.parquet", index=False
+    )
+
+
+def main():
+    parser = LightningArgumentParser(description=__doc__)
+    for name in ("triplet_folder", "lookup_file", "fold_split", "output_folder"):
+        parser.add_argument(f"--{name.replace('_', '-')}", type=Path, required=True)
+    parser.add_argument("--validation-fold", type=int, default=0)
+    parser.add_argument("--max-shift", type=int, default=5)
+    args = parser.parse_args()
+    make_parquet(
+        args.triplet_folder,
+        args.lookup_file,
+        args.fold_split,
+        args.output_folder,
+        args.validation_fold,
+        args.max_shift,
+    )
+
+
+if __name__ == "__main__":
+    main()

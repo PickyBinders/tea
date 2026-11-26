@@ -1,0 +1,16 @@
+EBA - embedding based alignment 
+Copyright (c) 2023-2024, SIB - Swiss Institute of Bioinformatics and
+                         Biozentrum - University of Basel
+
+EBA is developed in the Schwede lab at the Biozentrum - University of Basel. 
+The main authors are: Lorenzo Pantolini, Gabriel Studer, 
+Joana Pereira, Janani Durairaj, Gerardo Tauriello, Torsten Schwede
+                             
+If you find this software useful, please cite:
+
+L. Pantolini, G. Studer, J. Pereira, J. Durairaj, G. Tauriello, 
+T. Schwede. (2024). Embedding-based alignment: combining protein 
+language models with dynamic programming alignment to detect structural
+ similarities in the twilight-zone. Bioinformatics, Volume 40, Issue 1, January 2024.
+
+

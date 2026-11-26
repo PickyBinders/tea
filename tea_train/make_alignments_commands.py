@@ -1,20 +1,40 @@
-import pandas as pd
-from pathlib import Path
-from collections import defaultdict
+"""Write the original same-superfamily structural-alignment command list."""
 
-lookup_file = pd.read_csv("data/scope40_2_08/lookup_file.tsv", sep="\t", header=None, names=["id", "scop_id"])
-lookup_file["superfamily"] = lookup_file["scop_id"].map(lambda x: ".".join(x.split(".")[:3]))
-superfamily_to_ids = defaultdict(list)
-for sid, level_id in zip(lookup_file["id"], lookup_file["superfamily"]):
-    superfamily_to_ids[level_id].append(sid)
-output_folder = Path("data/scope40_2_08/output")
-matrices_folder = output_folder / "matrices"
-matrices_folder.mkdir(exist_ok=True, parents=True)
-pdb_folder = Path("data/scope40_2_08/pdbstyle-sel-gs-bib-40-2.08/pdbstyle-2.08")
-with open("data/scope40_2_08/run_alignments.cmd", "w") as f:
-    for superfamily in superfamily_to_ids:
-        ids = superfamily_to_ids[superfamily]
-        for i, id_1 in enumerate(ids):
-            for id_2 in ids[i+1:]:
-                f.write(f"python align_and_extract.py {id_1} {id_2} {pdb_folder} {matrices_folder}\n")
-print("Generated command file: data/scope40_2_08/run_alignments.cmd")
+from collections import defaultdict
+from pathlib import Path
+from shlex import join
+
+from lightning.pytorch.cli import LightningArgumentParser
+
+
+def write_commands(lookup_file, pdb_folder, alignment_folder, output):
+    superfamilies = defaultdict(list)
+    with Path(lookup_file).open() as handle:
+        for line in handle:
+            domain, scop = line.split()
+            superfamilies[".".join(scop.split(".")[:3])].append(domain)
+
+    Path(alignment_folder).mkdir(parents=True, exist_ok=True)
+    with Path(output).open("w") as handle:
+        for domains in superfamilies.values():
+            domains = sorted(domains)
+            for index, left in enumerate(domains):
+                for right in domains[index + 1:]:
+                    command = ["python", "-m", "tea_train.align_and_extract",
+                               left, right, str(pdb_folder), str(alignment_folder)]
+                    handle.write(join(command) + "\n")
+
+
+def main():
+    parser = LightningArgumentParser(description=__doc__)
+    parser.add_argument("--lookup-file", type=Path, required=True)
+    parser.add_argument("--pdb-folder", type=Path, required=True)
+    parser.add_argument("--alignment-folder", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    write_commands(args.lookup_file, args.pdb_folder, args.alignment_folder, args.output)
+    print(f"Wrote structural-alignment commands to {args.output}")
+
+
+if __name__ == "__main__":
+    main()
